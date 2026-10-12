@@ -1,0 +1,65 @@
+# Hypothetical APAC Risk Monitor — Week 1 portfolio definition
+# Edit this file freely. Instrument tickers and weights live ONLY here.
+# Weights must sum to 1.0 (±0.001). Sleeves: rates | ig_credit | hy_em | fx | alternatives
+
+portfolio_name: "Hypothetical APAC Multi-Asset Portfolio"
+base_currency: USD
+total_capital: 100000000
+benchmark: "AAXJ"   # iShares MSCI All Country Asia ex Japan (downloaded; not required as a position)
+
+# ---------------------------------------------------------------------------
+# Commented-out examples (copy/adapt). Replace the working block below.
+# ---------------------------------------------------------------------------
+# positions:
+#   - ticker: "IEF"
+#     sleeve: "rates"
+#     weight: 0.25
+#     rationale: "US 7-10y Treasury ETF as a liquid rates-duration proxy. Limitation: USD rates, not local APAC government curves."
+#   - ticker: "LQD"
+#     sleeve: "ig_credit"
+#     weight: 0.20
+#     rationale: "USD IG corporate proxy. Limitation: US-centric issuer mix vs APAC IG credit."
+#   - ticker: "EMB"
+#     sleeve: "hy_em"
+#     weight: 0.15
+#     rationale: "USD EM sovereign proxy. Limitation: not local-currency EM debt; Asia weight varies."
+#   - ticker: "HYG"
+#     sleeve: "hy_em"
+#     weight: 0.10
+#     rationale: "USD high-yield proxy. Limitation: US HY beta, not APAC HY cash bonds."
+#   - ticker: "FXY"
+#     sleeve: "fx"
+#     weight: 0.10
+#     rationale: "JPY currency ETF as a G10/APAC FX risk proxy. Limitation: single-currency, not a trade-weighted Asia FX basket."
+#   - ticker: "GLD"
+#     sleeve: "alternatives"
+#     weight: 0.20
+#     rationale: "Gold as a liquid alternative/hedge proxy. Limitation: no APAC real-asset or hedge-fund exposure."
+
+# Working hypothetical example so `python run_week1.py` runs with zero manual steps.
+# Replace tickers, weights, and rationales with your own.
+positions:
+  - ticker: "IEF"
+    sleeve: "rates"
+    weight: 0.25
+    rationale: "US 7-10y Treasury ETF as a liquid rates-duration proxy. Limitation: USD rates, not local APAC government curves."
+  - ticker: "LQD"
+    sleeve: "ig_credit"
+    weight: 0.20
+    rationale: "USD IG corporate proxy. Limitation: US-centric issuer mix vs APAC IG credit."
+  - ticker: "EMB"
+    sleeve: "hy_em"
+    weight: 0.15
+    rationale: "USD EM sovereign proxy. Limitation: not local-currency EM debt; Asia weight varies."
+  - ticker: "HYG"
+    sleeve: "hy_em"
+    weight: 0.10
+    rationale: "USD high-yield proxy. Limitation: US HY beta, not APAC HY cash bonds."
+  - ticker: "FXY"
+    sleeve: "fx"
+    weight: 0.10
+    rationale: "JPY currency ETF as a G10/APAC FX risk proxy. Limitation: single-currency, not a trade-weighted Asia FX basket."
+  - ticker: "GLD"
+    sleeve: "alternatives"
+    weight: 0.20
+    rationale: "Gold as a liquid alternative/hedge proxy. Limitation: no APAC real-asset or hedge-fund exposure."
