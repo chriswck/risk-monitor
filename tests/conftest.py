@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from src.config_loader import load_portfolio_config
-from tests.helpers import write_portfolio_yaml
+from src.config_loader import load_portfolio_config, load_risk_config
+from tests.helpers import write_portfolio_yaml, write_risk_yaml
 
 
 @pytest.fixture
@@ -48,3 +48,45 @@ def synthetic_prices() -> pd.DataFrame:
     # Long gap (>3) in CCC
     prices.loc[idx[50:56], "CCC"] = np.nan
     return prices
+
+
+@pytest.fixture
+def valid_risk_payload() -> dict:
+    return {
+        "var": {
+            "confidence_levels": [0.95, 0.99],
+            "lookback_days": 252,
+            "horizon_days": 1,
+            "method": "historical",
+        },
+        "performance": {
+            "risk_free_rate_annual": 0.03,
+            "trading_days_per_year": 252,
+            "rolling_vol_window": 60,
+        },
+        "risk_contribution": {"outsized_share_ratio": 1.5},
+        "exposure_assumptions": {
+            "rates": {"duration_years": 7.0},
+            "ig_credit": {"duration_years": 8.0, "spread_duration_years": 7.0},
+            "hy_em": {"duration_years": 4.0, "spread_duration_years": 3.5},
+            "fx": {"duration_years": 0.0},
+            "alternatives": {"duration_years": 0.0},
+        },
+        "historical_scenarios": [
+            {"name": "COVID selloff", "start": "2020-02-19", "end": "2020-03-23"},
+            {"name": "2022 rates shock", "start": "2022-01-03", "end": "2022-10-24"},
+        ],
+        "hypothetical_shocks": {
+            "rate_shock_bp": 100,
+            "credit_spread_widening_bp": 100,
+            "fx_depreciation_pct": 5.0,
+            "alternatives_drawdown_pct": 10.0,
+            "combined_severe": True,
+        },
+    }
+
+
+@pytest.fixture
+def valid_risk_config(tmp_path: Path, valid_risk_payload: dict, valid_config):
+    path = write_risk_yaml(tmp_path / "risk.yaml", valid_risk_payload)
+    return load_risk_config(path, portfolio_sleeves=list(valid_config.sleeve_weights.keys()))

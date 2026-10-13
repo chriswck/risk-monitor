@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from src.paths import DEFAULT_CONFIG_PATH
+from src.paths import DEFAULT_CONFIG_PATH, DEFAULT_RISK_CONFIG_PATH
 
 ALLOWED_SLEEVES = frozenset({"rates", "ig_credit", "hy_em", "fx", "alternatives"})
 WEIGHT_SUM_TOLERANCE = 0.001
@@ -150,5 +150,237 @@ def _validate_and_build(raw: dict[str, Any], path: Path) -> PortfolioConfig:
         total_capital=total_capital_f,
         benchmark=benchmark,
         positions=tuple(positions),
+        source_path=path,
+    )
+
+
+@dataclass(frozen=True)
+class SleeveExposure:
+    duration_years: float = 0.0
+    spread_duration_years: float = 0.0
+
+
+@dataclass(frozen=True)
+class HistoricalScenarioSpec:
+    name: str
+    start: str
+    end: str
+
+
+@dataclass(frozen=True)
+class VarSettings:
+    confidence_levels: tuple[float, ...]
+    lookback_days: int
+    horizon_days: int
+    method: str
+
+
+@dataclass(frozen=True)
+class PerformanceSettings:
+    risk_free_rate_annual: float
+    trading_days_per_year: int
+    rolling_vol_window: int
+
+
+@dataclass(frozen=True)
+class HypotheticalShocks:
+    rate_shock_bp: float
+    credit_spread_widening_bp: float
+    fx_depreciation_pct: float
+    alternatives_drawdown_pct: float
+    combined_severe: bool
+
+
+@dataclass(frozen=True)
+class RiskConfig:
+    var: VarSettings
+    performance: PerformanceSettings
+    outsized_share_ratio: float
+    exposure_assumptions: dict[str, SleeveExposure]
+    historical_scenarios: tuple[HistoricalScenarioSpec, ...]
+    hypothetical_shocks: HypotheticalShocks
+    source_path: Path
+
+
+def load_risk_config(
+    path: Path | None = None,
+    *,
+    portfolio_sleeves: list[str] | None = None,
+) -> RiskConfig:
+    """Parse ``config/risk.yaml`` and validate assumptions used by the risk engine."""
+    config_path = Path(path) if path is not None else DEFAULT_RISK_CONFIG_PATH
+    if not config_path.is_file():
+        raise ConfigError(
+            f"Risk config not found: {config_path}. "
+            "Create config/risk.yaml with VaR, performance, exposure, and scenario blocks."
+        )
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Invalid YAML in {config_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{config_path} must contain a YAML mapping, not {type(raw).__name__}.")
+    return _validate_risk_config(raw, config_path, portfolio_sleeves)
+
+
+def _as_float(value: Any, loc: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{loc} must be numeric; got {value!r}.") from exc
+
+
+def _as_int(value: Any, loc: str) -> int:
+    try:
+        as_int = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{loc} must be an integer; got {value!r}.") from exc
+    if float(value) != as_int:
+        raise ConfigError(f"{loc} must be an integer; got {value!r}.")
+    return as_int
+
+
+def _validate_risk_config(
+    raw: dict[str, Any],
+    path: Path,
+    portfolio_sleeves: list[str] | None,
+) -> RiskConfig:
+    var_raw = _require(raw, "var", path)
+    if not isinstance(var_raw, dict):
+        raise ConfigError(f"'var' must be a mapping in {path}.")
+    levels_raw = _require(var_raw, "confidence_levels", path)
+    if not isinstance(levels_raw, list) or not levels_raw:
+        raise ConfigError(f"'var.confidence_levels' must be a non-empty list in {path}.")
+    levels: list[float] = []
+    for i, item in enumerate(levels_raw):
+        level = _as_float(item, f"{path} var.confidence_levels[{i}]")
+        if not 0.0 < level < 1.0:
+            raise ConfigError(
+                f"Confidence level {level} is invalid in {path}. "
+                "Each level must be strictly between 0 and 1 (exclusive)."
+            )
+        levels.append(level)
+    lookback = _as_int(_require(var_raw, "lookback_days", path), f"{path} var.lookback_days")
+    horizon = _as_int(_require(var_raw, "horizon_days", path), f"{path} var.horizon_days")
+    if lookback < 2:
+        raise ConfigError(f"'var.lookback_days' must be >= 2 in {path}.")
+    if horizon < 1:
+        raise ConfigError(f"'var.horizon_days' must be >= 1 in {path}.")
+    method = str(_require(var_raw, "method", path)).strip().lower()
+    if method not in {"historical", "parametric"}:
+        raise ConfigError(
+            f"'var.method' must be 'historical' or 'parametric' in {path}; got {method!r}."
+        )
+
+    perf_raw = _require(raw, "performance", path)
+    if not isinstance(perf_raw, dict):
+        raise ConfigError(f"'performance' must be a mapping in {path}.")
+    rf = _as_float(
+        _require(perf_raw, "risk_free_rate_annual", path),
+        f"{path} performance.risk_free_rate_annual",
+    )
+    tdays = _as_int(
+        _require(perf_raw, "trading_days_per_year", path),
+        f"{path} performance.trading_days_per_year",
+    )
+    roll = _as_int(
+        _require(perf_raw, "rolling_vol_window", path),
+        f"{path} performance.rolling_vol_window",
+    )
+    if tdays < 1 or roll < 2:
+        raise ConfigError(
+            f"performance.trading_days_per_year must be >= 1 and "
+            f"rolling_vol_window >= 2 in {path}."
+        )
+
+    contrib_raw = raw.get("risk_contribution") or {}
+    if contrib_raw and not isinstance(contrib_raw, dict):
+        raise ConfigError(f"'risk_contribution' must be a mapping in {path}.")
+    outsized = _as_float(
+        contrib_raw.get("outsized_share_ratio", 1.5) if isinstance(contrib_raw, dict) else 1.5,
+        f"{path} risk_contribution.outsized_share_ratio",
+    )
+    if outsized <= 0:
+        raise ConfigError(f"'risk_contribution.outsized_share_ratio' must be > 0 in {path}.")
+
+    exp_raw = _require(raw, "exposure_assumptions", path)
+    if not isinstance(exp_raw, dict) or not exp_raw:
+        raise ConfigError(f"'exposure_assumptions' must be a non-empty mapping in {path}.")
+    exposures: dict[str, SleeveExposure] = {}
+    for sleeve, spec in exp_raw.items():
+        loc = f"{path} exposure_assumptions.{sleeve}"
+        if not isinstance(spec, dict):
+            raise ConfigError(f"{loc} must be a mapping of duration fields.")
+        duration = _as_float(spec.get("duration_years", 0.0), f"{loc}.duration_years")
+        spread = _as_float(spec.get("spread_duration_years", 0.0), f"{loc}.spread_duration_years")
+        exposures[str(sleeve)] = SleeveExposure(
+            duration_years=duration, spread_duration_years=spread
+        )
+
+    required_sleeves = list(portfolio_sleeves) if portfolio_sleeves is not None else []
+    missing = [s for s in required_sleeves if s not in exposures]
+    if missing:
+        raise ConfigError(
+            f"Missing duration assumptions for sleeve(s) {missing} in {path}. "
+            "Every sleeve present in portfolio.yaml must have an exposure_assumptions entry."
+        )
+
+    scenarios_raw = raw.get("historical_scenarios") or []
+    if not isinstance(scenarios_raw, list):
+        raise ConfigError(f"'historical_scenarios' must be a list in {path}.")
+    scenarios: list[HistoricalScenarioSpec] = []
+    for i, item in enumerate(scenarios_raw):
+        loc = f"{path} historical_scenarios[{i}]"
+        if not isinstance(item, dict):
+            raise ConfigError(f"{loc} must be a mapping with name, start, and end.")
+        for field in ("name", "start", "end"):
+            if field not in item or item[field] is None or item[field] == "":
+                raise ConfigError(f"{loc} is missing required field '{field}'.")
+        scenarios.append(
+            HistoricalScenarioSpec(
+                name=str(item["name"]),
+                start=str(item["start"]),
+                end=str(item["end"]),
+            )
+        )
+
+    hyp_raw = _require(raw, "hypothetical_shocks", path)
+    if not isinstance(hyp_raw, dict):
+        raise ConfigError(f"'hypothetical_shocks' must be a mapping in {path}.")
+    shocks = HypotheticalShocks(
+        rate_shock_bp=_as_float(
+            _require(hyp_raw, "rate_shock_bp", path), f"{path} hypothetical_shocks.rate_shock_bp"
+        ),
+        credit_spread_widening_bp=_as_float(
+            _require(hyp_raw, "credit_spread_widening_bp", path),
+            f"{path} hypothetical_shocks.credit_spread_widening_bp",
+        ),
+        fx_depreciation_pct=_as_float(
+            _require(hyp_raw, "fx_depreciation_pct", path),
+            f"{path} hypothetical_shocks.fx_depreciation_pct",
+        ),
+        alternatives_drawdown_pct=_as_float(
+            _require(hyp_raw, "alternatives_drawdown_pct", path),
+            f"{path} hypothetical_shocks.alternatives_drawdown_pct",
+        ),
+        combined_severe=bool(_require(hyp_raw, "combined_severe", path)),
+    )
+
+    return RiskConfig(
+        var=VarSettings(
+            confidence_levels=tuple(levels),
+            lookback_days=lookback,
+            horizon_days=horizon,
+            method=method,
+        ),
+        performance=PerformanceSettings(
+            risk_free_rate_annual=rf,
+            trading_days_per_year=tdays,
+            rolling_vol_window=roll,
+        ),
+        outsized_share_ratio=outsized,
+        exposure_assumptions=exposures,
+        historical_scenarios=tuple(scenarios),
+        hypothetical_shocks=shocks,
         source_path=path,
     )

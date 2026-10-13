@@ -1,0 +1,46 @@
+# APAC Risk Monitor — Week 2 risk-engine parameters
+# Edit freely. No risk assumptions live in source code.
+
+var:
+  confidence_levels: [0.95, 0.99]
+  lookback_days: 756          # ~3 years of trading days
+  horizon_days: 1
+  method: historical          # historical is primary; parametric (Gaussian) is also reported
+
+performance:
+  risk_free_rate_annual: 0.03
+  trading_days_per_year: 252
+  rolling_vol_window: 60
+
+risk_contribution:
+  outsized_share_ratio: 1.5   # flag when vol-contribution share / weight share exceeds this
+
+exposure_assumptions:
+  # First-order sleeve proxies. User should replace with book-specific durations.
+  rates:
+    duration_years: 7.0
+  ig_credit:
+    duration_years: 8.0
+    spread_duration_years: 7.0
+  hy_em:
+    duration_years: 4.0
+    spread_duration_years: 3.5
+  fx:
+    duration_years: 0.0
+  alternatives:
+    duration_years: 0.0
+
+historical_scenarios:
+  - name: "COVID selloff"
+    start: "2020-02-19"
+    end: "2020-03-23"
+  - name: "2022 rates shock"
+    start: "2022-01-03"
+    end: "2022-10-24"
+
+hypothetical_shocks:
+  rate_shock_bp: 100              # parallel yield shift
+  credit_spread_widening_bp: 100
+  fx_depreciation_pct: 5.0
+  alternatives_drawdown_pct: 10.0
+  combined_severe: true           # apply all shocks at once
