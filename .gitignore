@@ -10,3 +10,5 @@ venv/
 .DS_Store
 data/raw/*.csv
 data/processed/*.csv
+reports/*.md
+reports/*.html

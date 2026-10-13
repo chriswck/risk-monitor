@@ -1,0 +1,54 @@
+# APAC Risk Monitor — Week 3 alert thresholds and escalation text
+# Edit freely. Limits and recommended actions live ONLY here.
+# Units: percent points (8.0 means 8%). Loss-type metrics: higher is worse; red must exceed amber.
+
+limits:
+  annualized_volatility_pct:
+    amber: 8.0
+    red: 12.0
+    escalation_text: >
+      Review sleeve Euler contributions and rolling volatility. Consider whether
+      the dominant sleeve still belongs at its current weight, or whether a vol
+      overlay / hedge is warranted.
+  max_drawdown_pct:
+    amber: 10.0
+    red: 15.0
+    escalation_text: >
+      Reconstruct the peak-to-trough window and check whether the same names that
+      drove the drawdown still dominate risk contribution. Discuss stop-loss,
+      rebalancing, or a reduction in the worst-hit sleeve.
+  var_99_1d_pct:
+    amber: 1.5
+    red: 2.5
+    escalation_text: >
+      Review top risk contributors and consider trimming the dominant sleeve or
+      hedging rate/spread exposure.
+  es_99_1d_pct:
+    amber: 2.0
+    red: 3.5
+    escalation_text: >
+      Expected shortfall is in the tail beyond VaR. Inspect recent extreme-return
+      flags and the 99% historical window before adding risk.
+  single_position_weight_pct:
+    amber: 25.0
+    red: 35.0
+    escalation_text: >
+      A single name is a large share of NAV. Confirm the rationale in
+      portfolio.yaml and whether concentration is intentional.
+  combined_scenario_loss_pct:
+    amber: 5.0
+    red: 8.0
+    escalation_text: >
+      Combined severe P&L is a first-order approximation. Review duration and
+      spread-duration assumptions, then the worst-hit sleeve, before treating
+      the loss as a capital number.
+
+overall_status_rule: "red if any metric is red; else amber if any is amber; else green"
+
+assumptions_and_limitations:
+  - "Historical VaR/ES depend on the lookback window and the ETF proxy sample; they are not a forward-looking loss distribution."
+  - "Duration and spread-duration shocks are first-order: they ignore convexity, basis, correlation shifts, and second-round liquidity effects."
+  - "Portfolio math uses static weights (no rebalancing, no transaction costs)."
+  - "Market data are public ETF proxies via Yahoo Finance, not cash bonds, local curves, or OTC FX."
+  - "Parametric VaR assumes Gaussian i.i.d. returns and will typically understate tail loss relative to historical ES."
+  - "Alert thresholds are user-chosen limits, not regulatory capital rules."

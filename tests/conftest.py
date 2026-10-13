@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from src.config_loader import load_portfolio_config, load_risk_config
-from tests.helpers import write_portfolio_yaml, write_risk_yaml
+from tests.helpers import write_portfolio_yaml, write_risk_yaml, write_thresholds_yaml
 
 
 @pytest.fixture
@@ -90,3 +90,51 @@ def valid_risk_payload() -> dict:
 def valid_risk_config(tmp_path: Path, valid_risk_payload: dict, valid_config):
     path = write_risk_yaml(tmp_path / "risk.yaml", valid_risk_payload)
     return load_risk_config(path, portfolio_sleeves=list(valid_config.sleeve_weights.keys()))
+
+
+@pytest.fixture
+def valid_thresholds_payload() -> dict:
+    return {
+        "limits": {
+            "annualized_volatility_pct": {
+                "amber": 8.0,
+                "red": 12.0,
+                "escalation_text": "Review vol contributors.",
+            },
+            "max_drawdown_pct": {
+                "amber": 10.0,
+                "red": 15.0,
+                "escalation_text": "Review drawdown window.",
+            },
+            "var_99_1d_pct": {
+                "amber": 1.5,
+                "red": 2.5,
+                "escalation_text": "Review VaR contributors.",
+            },
+            "es_99_1d_pct": {
+                "amber": 2.0,
+                "red": 3.5,
+                "escalation_text": "Review tail losses.",
+            },
+            "single_position_weight_pct": {
+                "amber": 25.0,
+                "red": 35.0,
+                "escalation_text": "Review name concentration.",
+            },
+            "combined_scenario_loss_pct": {
+                "amber": 5.0,
+                "red": 8.0,
+                "escalation_text": "Review combined shock assumptions.",
+            },
+        },
+        "overall_status_rule": "red if any metric is red; else amber if any is amber; else green",
+        "assumptions_and_limitations": ["Static weights.", "First-order duration shocks."],
+    }
+
+
+@pytest.fixture
+def valid_thresholds_config(tmp_path: Path, valid_thresholds_payload: dict):
+    from src.config_loader import load_thresholds_config
+
+    path = write_thresholds_yaml(tmp_path / "thresholds.yaml", valid_thresholds_payload)
+    return load_thresholds_config(path)

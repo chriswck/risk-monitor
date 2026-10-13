@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from src.paths import DEFAULT_CONFIG_PATH, DEFAULT_RISK_CONFIG_PATH
+from src.paths import DEFAULT_CONFIG_PATH, DEFAULT_RISK_CONFIG_PATH, DEFAULT_THRESHOLDS_PATH
 
 ALLOWED_SLEEVES = frozenset({"rates", "ig_credit", "hy_em", "fx", "alternatives"})
 WEIGHT_SUM_TOLERANCE = 0.001
@@ -382,5 +382,107 @@ def _validate_risk_config(
         exposure_assumptions=exposures,
         historical_scenarios=tuple(scenarios),
         hypothetical_shocks=shocks,
+        source_path=path,
+    )
+
+
+ALLOWED_STATUSES = frozenset({"green", "amber", "red"})
+CANONICAL_STATUS_RULE = "red if any metric is red; else amber if any is amber; else green"
+REQUIRED_THRESHOLD_METRICS = (
+    "annualized_volatility_pct",
+    "max_drawdown_pct",
+    "var_99_1d_pct",
+    "es_99_1d_pct",
+    "single_position_weight_pct",
+    "combined_scenario_loss_pct",
+)
+
+
+@dataclass(frozen=True)
+class MetricLimit:
+    metric: str
+    amber: float
+    red: float
+    escalation_text: str
+
+
+@dataclass(frozen=True)
+class ThresholdsConfig:
+    limits: dict[str, MetricLimit]
+    overall_status_rule: str
+    assumptions_and_limitations: tuple[str, ...]
+    source_path: Path
+
+
+def load_thresholds_config(path: Path | None = None) -> ThresholdsConfig:
+    """Parse ``config/thresholds.yaml`` and validate alert limits."""
+    config_path = Path(path) if path is not None else DEFAULT_THRESHOLDS_PATH
+    if not config_path.is_file():
+        raise ConfigError(
+            f"Thresholds config not found: {config_path}. "
+            "Create config/thresholds.yaml with limits and escalation_text per metric."
+        )
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Invalid YAML in {config_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{config_path} must contain a YAML mapping, not {type(raw).__name__}.")
+    return _validate_thresholds_config(raw, config_path)
+
+
+def _normalize_rule(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _validate_thresholds_config(raw: dict[str, Any], path: Path) -> ThresholdsConfig:
+    limits_raw = _require(raw, "limits", path)
+    if not isinstance(limits_raw, dict) or not limits_raw:
+        raise ConfigError(f"'limits' must be a non-empty mapping in {path}.")
+
+    missing = [m for m in REQUIRED_THRESHOLD_METRICS if m not in limits_raw]
+    if missing:
+        raise ConfigError(
+            f"Missing required metric limit(s) {missing} in {path}. "
+            f"Required: {list(REQUIRED_THRESHOLD_METRICS)}."
+        )
+
+    limits: dict[str, MetricLimit] = {}
+    for metric, spec in limits_raw.items():
+        loc = f"{path} limits.{metric}"
+        if not isinstance(spec, dict):
+            raise ConfigError(f"{loc} must be a mapping with amber, red, and escalation_text.")
+        for field_name in ("amber", "red", "escalation_text"):
+            if field_name not in spec or spec[field_name] is None or spec[field_name] == "":
+                raise ConfigError(f"{loc} is missing required field '{field_name}'.")
+        amber = _as_float(spec["amber"], f"{loc}.amber")
+        red = _as_float(spec["red"], f"{loc}.red")
+        if red <= amber:
+            raise ConfigError(
+                f"{loc}: red ({red}) must be greater than amber ({amber}) for loss-type metrics."
+            )
+        text = str(spec["escalation_text"]).strip()
+        if not text:
+            raise ConfigError(f"{loc}.escalation_text must be non-empty.")
+        limits[str(metric)] = MetricLimit(
+            metric=str(metric), amber=amber, red=red, escalation_text=text
+        )
+
+    rule = str(_require(raw, "overall_status_rule", path)).strip()
+    if _normalize_rule(rule) != _normalize_rule(CANONICAL_STATUS_RULE):
+        raise ConfigError(
+            f"'overall_status_rule' in {path} is not a supported rule. "
+            f"Use exactly: {CANONICAL_STATUS_RULE!r}."
+        )
+
+    assumptions_raw = raw.get("assumptions_and_limitations") or []
+    if not isinstance(assumptions_raw, list):
+        raise ConfigError(f"'assumptions_and_limitations' must be a list in {path}.")
+    assumptions = tuple(str(item).strip() for item in assumptions_raw if str(item).strip())
+
+    return ThresholdsConfig(
+        limits=limits,
+        overall_status_rule=rule,
+        assumptions_and_limitations=assumptions,
         source_path=path,
     )

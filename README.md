@@ -1,6 +1,6 @@
-# APAC Risk Monitor (Week 1–2)
+# APAC Risk Monitor (Week 1–3)
 
-APAC Risk Monitor is a config-driven tool for a hypothetical APAC-oriented fixed-income / multi-asset book. Week 1 loads positions from YAML, pulls daily adjusted closes, cleans and validates the panel, and builds static-weight portfolio, sleeve, and benchmark return series. Week 2 is the **risk engine**: performance metrics, historical (and Gaussian) VaR/ES, Euler risk contribution, and historical plus first-order hypothetical stress scenarios. Dashboards and report generators are out of scope until Week 3.
+APAC Risk Monitor is a config-driven tool for a hypothetical APAC-oriented fixed-income / multi-asset book. Week 1 loads positions from YAML, pulls daily adjusted closes, and builds static-weight returns. Week 2 is the **risk engine** (metrics, VaR/ES, Euler contribution, scenarios). Week 3 is the **presentation layer**: a Streamlit dashboard with threshold alerts and a dated markdown/HTML risk report. The dashboard calls existing `src/` modules; it does not reimplement analytics.
 
 ## Setup
 
@@ -13,44 +13,80 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Edit `config/portfolio.yaml` (tickers, sleeves, weights) and `config/risk.yaml` (VaR window, risk-free rate, duration assumptions, scenario dates and shocks). Weights must sum to `1.0` (±0.001). Allowed sleeves: `rates`, `ig_credit`, `hy_em`, `fx`, `alternatives`.
+Edit:
+
+- `config/portfolio.yaml` — tickers, sleeves, weights
+- `config/risk.yaml` — VaR window, durations, shocks
+- `config/thresholds.yaml` — amber/red limits and escalation text
+
+Weights must sum to `1.0` (±0.001). Allowed sleeves: `rates`, `ig_credit`, `hy_em`, `fx`, `alternatives`.
 
 ## How to run
 
-**Week 1** (data + portfolio returns), from the repository root:
+**Week 1** (data + portfolio returns):
 
 ```bash
 python run_week1.py
 ```
 
-**Week 2** (risk engine on the latest processed returns):
+**Week 2** (risk engine):
 
 ```bash
 python run_week2.py
 ```
 
-Then open `notebooks/01_week1_exploration.ipynb` and `notebooks/02_week2_risk_engine.ipynb`.
+**Week 3 — dashboard** (requires processed returns from Week 1; the app runs the Week 2 engine itself):
+
+```bash
+streamlit run app.py
+```
+
+**Week 3 — written report:**
+
+```bash
+python run_week3.py
+# equivalent: python -m src.reporting
+```
+
+Writes `reports/risk_report_YYYYMMDD.md` and `.html`. Executive summary and top-risk narrative are `[USER COMMENTARY: …]` placeholders — fill those in yourself.
+
+Notebooks: `notebooks/01_week1_exploration.ipynb`, `notebooks/02_week2_risk_engine.ipynb`.
 
 ```bash
 pytest
 ```
 
-Outputs (`data/processed/`, dated, never overwritten):
+## Screenshot placeholder
 
-- `returns_YYYYMMDD.csv`, `portfolio_returns_YYYYMMDD.csv` — Week 1
-- `risk_metrics_summary_YYYYMMDD.csv`
-- `correlation_matrix_YYYYMMDD.csv`
-- `risk_contribution_YYYYMMDD.csv`
-- `scenario_results_YYYYMMDD.csv`
+![Dashboard screenshot](docs/dashboard_screenshot.png)
+
+_Add a screenshot of the Streamlit **Executive Summary** tab here after your first local run._
+
+## Project structure
+
+```
+risk_portfolio/
+├── app.py                      # Streamlit dashboard
+├── run_week1.py / run_week2.py / run_week3.py
+├── config/
+│   ├── portfolio.yaml
+│   ├── risk.yaml
+│   └── thresholds.yaml
+├── src/                        # engine + alerts + reporting
+├── data/raw/  data/processed/
+├── notebooks/
+├── reports/                    # dated markdown + HTML
+├── tests/
+└── README.md
+```
 
 ## Risk methodology (Week 2)
 
-- **Return / vol / Sharpe:** daily mean and sample std, annualized with `trading_days_per_year`; Sharpe uses `risk_free_rate_annual` from `config/risk.yaml`.
-- **Drawdown:** peak-to-trough of the compounded wealth index, with peak and trough dates.
-- **VaR / ES (loss-positive):** `loss = -return`. Historical VaR is the configured quantile of losses over `lookback_days` (warns and shortens if history is thinner). ES is the mean of losses at or beyond that VaR. A Gaussian (parametric) VaR/ES is reported alongside for comparison. Horizon scaling uses `horizon_days`.
-- **Risk contribution:** Euler allocation `w_i (Σ w)_i / σ_p` on the annualized covariance; position and sleeve contributions sum to portfolio volatility. A position is flagged when contribution share / weight share exceeds `outsized_share_ratio`.
-- **Historical scenarios:** compound P&L over configured date windows; windows outside the sample are warned, not silently filled.
-- **Hypothetical shocks:** first-order sleeve P&L: rates `-duration × Δy × value`, credit `-spread_duration × Δs × value`, FX and alternatives as percentage NAV hits. Combined severe applies every configured shock at once.
+- **Return / vol / Sharpe:** daily mean and sample std, annualized with `trading_days_per_year`; Sharpe uses `risk_free_rate_annual`.
+- **Drawdown:** peak-to-trough of the compounded wealth index.
+- **VaR / ES (loss-positive):** `loss = -return`. Historical VaR is the configured quantile of losses; ES is the mean of losses at or beyond VaR. Gaussian VaR/ES is a comparison only.
+- **Risk contribution:** Euler allocation; contributions sum to portfolio volatility.
+- **Hypothetical shocks:** first-order sleeve P&L. Combined severe applies every configured shock at once.
 
 ## Known limitations
 
@@ -59,12 +95,13 @@ Outputs (`data/processed/`, dated, never overwritten):
 - Portfolio math uses **static weights** (no rebalancing, no transaction costs).
 - Market data are **public ETF proxies** via Yahoo Finance, not the cash bonds, local curves, or OTC FX a live APAC book would hold.
 - Parametric VaR assumes Gaussian i.i.d. returns; it will typically understate tail loss relative to historical ES.
+- Alert thresholds are user-chosen committee limits, not regulatory capital rules.
 
 ## Data sources and assumptions (Week 1)
 
-- **Source:** Yahoo Finance via `yfinance`, daily **adjusted** close (splits/dividends).
-- **History:** about five years; a name with under two years of data is warned and skipped.
-- **Calendar:** common trading calendar after short-gap forward-fill (≤3 trading days). Longer gaps are dropped and reported. Extreme days with **|daily return| > 10%** are flagged and **kept**.
+- **Source:** Yahoo Finance via `yfinance`, daily **adjusted** close.
+- **History:** about five years; names with under two years are warned and skipped.
+- **Calendar:** common trading calendar after short-gap forward-fill (≤3 trading days). Extreme days with **|daily return| > 10%** are flagged and **kept**.
 - **Currency:** `base_currency` is recorded as USD; the pipeline does not convert local-currency prices.
 
-Every cleaning decision and every risk warning is printed. Invalid config raises a named error rather than guessing.
+Every cleaning decision and risk warning is printed. Invalid config raises a named error rather than guessing.
